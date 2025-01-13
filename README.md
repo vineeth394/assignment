@@ -41,3 +41,11 @@ echo "Verifying Maven installation..."
 mvn -version
 
 echo "Java and Maven installation completed successfully."
+
+========================================================================================================================================================================
+Access Your Servlet on tomcat
+Open your web browser and go to http://<EC2-PUBLIC-IP>:8080/my-helloworld/helloWorld to access your servlet.
+
+You can test it by adding the error=true query parameter to see the error handling in action, e.g., http://<EC2-PUBLIC-IP>:8080/my-helloworld/helloWorld?error=true.
+
+
