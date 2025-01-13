@@ -2,48 +2,61 @@ package com.example;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import javax.servlet.RequestDispatcher;
+import javax.servlet.ServletConfig;
+import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
-
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-public class HelloWorldServletTest {
+class HelloWorldServletTest {
 
-    private HelloWorldServlet helloWorldServlet;
-    private HttpServletRequest request;
-    private HttpServletResponse response;
-    private PrintWriter writer;
+    @Mock private HttpServletRequest request;
+    @Mock private HttpServletResponse response;
+    @Mock private ServletConfig servletConfig;
+    @Mock private ServletContext servletContext;
+    @Mock private PrintWriter writer;
+
+    private HelloWorldServlet servlet;
 
     @BeforeEach
-    public void setUp() {
-        helloWorldServlet = new HelloWorldServlet();
-
-        // Mock HttpServletRequest and HttpServletResponse
-        request = mock(HttpServletRequest.class);
-        response = mock(HttpServletResponse.class);
-        
-        // Mock the response's PrintWriter to capture output
-        try {
-            writer = mock(PrintWriter.class);
-            when(response.getWriter()).thenReturn(writer);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    void setUp() throws Exception {
+        MockitoAnnotations.openMocks(this);
+        servlet = new HelloWorldServlet();
+        when(response.getWriter()).thenReturn(writer);
     }
 
+    // Test 1: Simple HelloWorldServlet Response
     @Test
-    public void testDoGet() throws Exception {
-        // Call the doGet method of the servlet
-        helloWorldServlet.doGet(request, response);
+    void testServletResponse() throws Exception {
+        servlet.doGet(request, response);
+        verify(writer).write("Hello World");
+    }
 
-        // Verify that the content type is set correctly
+    // Test 2: Check HTTP Status Code
+    @Test
+    void testHttpStatusCode() throws Exception {
+        servlet.doGet(request, response);
+        verify(response).setStatus(HttpServletResponse.SC_OK);
+    }
+
+    // Test 3: Check Content-Type header
+    @Test
+    void testContentType() throws Exception {
+        servlet.doGet(request, response);
         verify(response).setContentType("text/html");
+    }
 
-        // Verify that the response writer is used to send the correct output
-        verify(writer).write("<h1>Hello, World!</h1>");
+    // Test 4: Test Error Handling - Simulating Error (e.g., request error)
+    @Test
+    void testErrorHandling() throws Exception {
+        when(request.getParameter("error")).thenReturn("true"); // simulate an error
+        servlet.doGet(request, response);
+        verify(response).sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid request parameter");
     }
 }
