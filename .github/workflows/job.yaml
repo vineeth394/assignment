@@ -1,124 +1,110 @@
-name: Java CI with Maven, SonarQube, and Production Deployment
+name: Continuous Integration for Java with Maven, SonarQube, and Deployment to Production
 
 on:
   push:
     branches:
-      - master
+      - main
       - 'feature/*'
   pull_request:
     branches:
-      - master
+      - main
       - 'feature/*'
   workflow_dispatch:
     inputs:
       deploy:
-        description: 'Trigger deploy to production'
+        description: 'Initiate production deployment'
         required: true
         default: 'false'
 
 jobs:
-  # Parallel Job: Build and Test on Self-Hosted EC2 (with Tomcat installed)
+  # Parallel Job: Build and Test on EC2 with Tomcat
   build_and_test:
-    # This job will run on a self-hosted runner with the "staging" label.
-    # Ensure your self-hosted runner for staging has the label `staging` assigned to it.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
+    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat (Staging)
     steps:
-      - name: Checkout code
+      - name: Checkout the repository
         uses: actions/checkout@v2
 
-      - name: Run Environment Setup Script (env-setup.sh)
+      - name: Set up the environment (env-setup.sh)
         run: |
           chmod +x ./env-setup.sh
-          ./env-setup.sh  # This sets up Java, Maven, etc.
+          ./env-setup.sh  # Installs Java, Maven, etc.
 
-      - name: Build with Maven
-        run: mvn clean install -DskipTests
-        if: ${{ github.event_name != 'pull_request' }}  # Only run on push events, skip for PR
+      - name: Build the project using Maven
+        run: mvn clean install
+        if: ${{ github.event_name != 'pull_request' }}  # Execute only for push events
 
-      - name: Run Unit Tests with Maven
+      - name: Execute Unit Tests with Maven
         run: mvn test
-        if: ${{ success() }}  # Run this step only if the previous build step succeeded
+        if: ${{ success() }}  # Run tests if the build was successful
 
-  # Sequential Jobs: SonarQube Analysis and Artifact Upload
+  # Sequential Jobs: Run SonarQube analysis and upload the artifact
   sonar_analysis:
-    # This job will also run on the self-hosted runner with the "staging" label.
-    # Ensure the staging runner has the "staging" label.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
+    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat (Staging)
     needs: build_and_test
-    if: ${{ needs.build_and_test.result == 'success' }}  # Run only if build and test succeed
+    if: ${{ needs.build_and_test.result == 'success' }}  # Execute if build/test passed
     steps:
-      - name: Checkout code
+      - name: Checkout the repository
         uses: actions/checkout@v2
 
-      - name: Run SonarQube analysis
-        uses: SonarSource/sonarcloud-github-action@v1
-        with:
-          sonar-token: ${{ secrets.SONAR_TOKEN }}
-          sonar-host-url: 'https://sonarcloud.io'
+      - name: Perform SonarQube analysis
+        run: |
+          mvn clean verify sonar:sonar \
+            -Dsonar.organization=vineeth394 \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.projectKey=vineeth394_assignment \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
   upload_artifact:
-    # This job will also run on the self-hosted runner with the "staging" label.
-    # Ensure the staging runner has the "staging" label.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
+    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat (Staging)
     needs: build_and_test
-    if: ${{ needs.build_and_test.result == 'success' }}  # Run only if build and test succeed
+    if: ${{ needs.build_and_test.result == 'success' }}  # Execute if build/test passed
     steps:
-      - name: Checkout code
+      - name: Checkout the repository
         uses: actions/checkout@v2
 
-      - name: Upload Artifact to JFrog Artifactory
+      - name: Upload artifact to JFrog Artifactory
         run: |
-          echo "Uploading artifact to JFrog Artifactory..."
-          curl -u "${{ secrets.JFROG_USERNAME }}:${{ secrets.JFROG_API_KEY }}" \
-               -T target/my-helloworld.war \
-               "https://jfrog.example.com/artifactory/my-repo/my-helloworld-${{ needs.build_and_test.outputs.version }}.war"
+          echo "Uploading the artifact to JFrog Artifactory..."
+          sudo curl -u "${{ secrets.ARTIFACTORY_USER }}:${{ secrets.ARTIFACTORY_PASSWORD }}" -T "target/my-helloworld-1.0-snapshot.war" "http://44.222.253.17:8082/artifactory/assignment-vik-libs-snapshot/my-helloworld-1.0-snapshot2.war"
 
-  # Matrix Job: Deployment to Staging and Production (Self-Hosted EC2 with Tomcat installed)
+  # Matrix Job: Deployment to Staging and Production environments
   deploy:
-    # This job will deploy to both staging and production environments based on the matrix configuration.
-    # The staging environment will use the self-hosted runner with the "staging" label.
-    # The production environment will use the self-hosted runner with the "production" label.
-    runs-on: [self-hosted, ${{ matrix.environment }}]  # Use dynamic environment (staging or production)
-    needs: [sonar_analysis, upload_artifact]  # Waits for SonarQube and Artifactory jobs to complete
     strategy:
       matrix:
-        environment: [staging, production]  # Deploy to both staging and production environments
+        node: [staging, production]  # Deploy to both environments
+    runs-on: ${{ matrix.node }}  # Dynamically selects staging or production
+    needs: [sonar_analysis, upload_artifact]  # Wait for SonarQube analysis and artifact upload
     steps:
-      - name: Checkout code
+      - name: Checkout the repository
         uses: actions/checkout@v2
 
-      - name: Deploy to Tomcat (Staging/Production)
+      - name: Deploy to Tomcat (Staging or Production)
         run: |
-          echo "Deploying to ${matrix.environment}..."
+          echo "Deploying to the ${matrix.node} environment..."
 
-          # Deploy artifact to the appropriate Tomcat server based on the environment
-          if [ "${{ matrix.environment }}" == "staging" ]; then
-            # Deployment to the staging environment
-            scp -i /path/to/your/key.pem target/my-helloworld.war ec2-user@staging:/path/to/tomcat/webapps/
-            ssh -i /path/to/your/key.pem ec2-user@staging "systemctl restart tomcat"
-          elif [ "${{ matrix.environment }}" == "production" ]; then
-            # Deployment to the production environment (only triggered on master branch)
-            if [[ $GITHUB_REF == "refs/heads/master" ]]; then
-              scp -i /path/to/your/key.pem target/my-helloworld.war ec2-user@production:/path/to/tomcat/webapps/
-              ssh -i /path/to/your/key.pem ec2-user@production "systemctl restart tomcat"
-            else
-              echo "Skipping production deployment: Only from master branch"
-            fi
+          # Deploy the artifact based on the environment
+          if [ "${{ matrix.node }}" == "staging" ]; then
+            sudo chown -R ubuntu:ubuntu /opt
+            cd /opt/apache-tomcat-10.1.34/webapps/
+            curl -L -u "${{ secrets.ARTIFACTORY_USER }}:${{ secrets.ARTIFACTORY_PASSWORD }}" -O "http://44.222.253.17:8082/artifactory/assignment-vik-libs-snapshot/my-helloworld-1.0-snapshot1.war"
+          elif [ "${{ matrix.node }}" == "production" ]; then
+            sudo chown -R ubuntu:ubuntu /opt
+            cd /opt/apache-tomcat-10.1.34/webapps/
+            curl -L -u "${{ secrets.ARTIFACTORY_USER }}:${{ secrets.ARTIFACTORY_PASSWORD }}" -O "http://44.222.253.17:8082/artifactory/assignment-vik-libs-snapshot/my-helloworld-1.0-snapshot1.war"
+          else
+            echo "Skipping deployment: Node does not match"
           fi
-        if: ${{ needs.upload_artifact.result == 'success' }}  # Deploy only if the artifact upload was successful
+        if: ${{ needs.upload_artifact.result == 'success' }}  # Deploy if the artifact upload is successful
 
   # Conditional Job: Trigger Deploy Only if Deploy Input is True (Manual Trigger)
   deploy_input_condition:
-    # This job will run on the self-hosted runner with the "production" label.
-    # Ensure your production runner has the label `production` assigned to it.
-    runs-on: [self-hosted, production]  # Self-hosted EC2 with Tomcat installed (Production)
-    if: ${{ github.event.inputs.deploy == 'true' }}  # Only runs if the deploy input is set to true from workflow_dispatch
+    runs-on: [self-hosted, production]  # Self-hosted EC2 with Tomcat (Production)
+    if: ${{ github.event.inputs.deploy == 'true' }}  # Triggered manually
     steps:
-      - name: Checkout code
+      - name: Checkout the repository
         uses: actions/checkout@v2
 
-      - name: Deploy to Production (Input Triggered)
+      - name: Deploy to Production (Manual Triggered)
         run: |
-          echo "Manual deploy triggered, deploying to production..."
-          # Deployment logic here
-        if: ${{ github.event.inputs.deploy == 'true' }}  # Condition based on the input
+          echo "Manual deployment triggered, deploying to production..."
+          # Deployment logic for production
